@@ -1,0 +1,18 @@
+<!--index.wxml-->
+<navigation-bar title="小程序推理评测工具" back="{{false}}" color="black" background="#FFF"></navigation-bar>
+
+<!-- 按钮区域 -->
+<view class="button-group">
+  <button class="btn" bindtap="downloadDataset">下载评测数据集</button>
+  <button class="btn" bindtap="downloadModel">下载加载模型</button>
+  <button class="btn" bindtap="runEvaluation">运行评测</button>
+  <button class="btn export-btn" bindtap="exportResults">导出评测结果</button>
+</view>
+
+<view class="container">
+  <!-- 结果展示区域 -->
+  <view class="result-section">
+    <text class="result-item">平均推理时间：{{avgTime}} ms</text>
+    <text class="result-item">中位数推理时间：{{medianTime}} ms</text>
+  </view>
+</view>
