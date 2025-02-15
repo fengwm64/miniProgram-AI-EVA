@@ -10,19 +10,93 @@ Page({
     testImagePath: "" // 用于存储测试图片路径
   },
 
+  // 清空指定路径的文件
+  clearFile: function (filePath) {
+    const fileManager = wx.getFileSystemManager();
+    return new Promise((resolve, reject) => {
+      fileManager.unlink({
+        filePath: filePath,
+        success: () => {
+          console.log(`文件 ${filePath} 已删除`);
+          resolve();
+        },
+        fail: (err) => {
+          console.error(`删除文件 ${filePath} 失败`, err);
+          reject(err);
+        }
+      });
+    });
+  },
+
   // 点击“下载评测数据集”按钮时调用
   downloadDataset: function () {
-    // 按要求修改 datasetUrl
     const datasetUrl = "https://hub.fnas64.xin/https://raw.githubusercontent.com/fengwm64/miniprogram-ai-eva/main/dataset/labels.json";
     const fileManager = wx.getFileSystemManager();
     const labelsPath = `${wx.env.USER_DATA_PATH}/labels.json`;
     const that = this;
 
+    // 检查文件是否存在
+    fileManager.access({
+      path: labelsPath,
+      success: () => {
+        // 文件已存在，弹出对话框让用户选择是否重新下载
+        wx.showModal({
+          title: "提示",
+          content: "数据集已存在，是否重新下载？",
+          success: (res) => {
+            if (res.confirm) {
+              // 用户选择重新下载，清空已下载的文件
+              that.clearFile(labelsPath)
+                .then(() => {
+                  console.log("开始重新下载数据集");
+                  that.downloadFileAndImages(datasetUrl, labelsPath);
+                })
+                .catch((err) => {
+                  console.error("清空文件失败", err);
+                });
+            } else if (res.cancel) {
+              // 用户选择取消，直接使用已下载的文件
+              console.log("使用已下载的数据集");
+              fileManager.readFile({
+                filePath: labelsPath,
+                encoding: "utf8",
+                success: (readRes) => {
+                  try {
+                    let dataset = JSON.parse(readRes.data);
+                    console.log("解析后的数据集：", dataset);
+                    that.setData({ datasetLabels: dataset });
+                    // 检查图片是否已下载
+                    that.checkAndDownloadImages(dataset.images);
+                  } catch (e) {
+                    console.error("JSON 解析错误", e);
+                  }
+                },
+                fail: (err) => {
+                  console.error("读取标签文件失败", err);
+                }
+              });
+            }
+          }
+        });
+      },
+      fail: () => {
+        // 文件不存在，直接下载
+        console.log("labels.json 不存在，开始下载");
+        that.downloadFileAndImages(datasetUrl, labelsPath);
+      }
+    });
+  },
+
+  // 下载文件并处理图片
+  downloadFileAndImages: function (fileUrl, filePath) {
+    const that = this;
+    const fileManager = wx.getFileSystemManager();
+
     wx.downloadFile({
-      url: datasetUrl,
+      url: fileUrl,
       success: (res) => {
         if (res.statusCode === 200) {
-          console.log("labels.json 下载成功", res.tempFilePath);
+          console.log("文件下载成功", res.tempFilePath);
           // 从临时文件读取内容，确保数据完整
           fileManager.readFile({
             filePath: res.tempFilePath,
@@ -31,14 +105,14 @@ Page({
               console.log("读取临时文件成功，内容：", readTempRes.data);
               // 将读取到的内容写入到目标路径
               fileManager.writeFile({
-                filePath: labelsPath,
+                filePath: filePath,
                 data: readTempRes.data,
                 encoding: "utf8",
                 success: () => {
-                  console.log("标签文件写入成功", labelsPath);
+                  console.log("文件写入成功", filePath);
                   // 再次读取文件，解析 JSON 数据
                   fileManager.readFile({
-                    filePath: labelsPath,
+                    filePath: filePath,
                     encoding: "utf8",
                     success: (readRes) => {
                       try {
@@ -52,12 +126,12 @@ Page({
                       }
                     },
                     fail: (err) => {
-                      console.error("读取标签文件失败", err);
+                      console.error("读取文件失败", err);
                     }
                   });
                 },
                 fail: (err) => {
-                  console.error("写入标签文件失败", err);
+                  console.error("写入文件失败", err);
                 }
               });
             },
@@ -66,114 +140,65 @@ Page({
             }
           });
         } else {
-          console.error("标签文件下载失败，状态码：", res.statusCode);
+          console.error("文件下载失败，状态码：", res.statusCode);
         }
       },
       fail: (err) => {
-        console.error("下载标签文件失败", err);
+        console.error("下载文件失败", err);
       }
-    });
-  },
-
-  // 遍历图片列表，下载所有图片并保存到本地
-  downloadImages: function (images) {
-    const that = this;
-    const fileManager = wx.getFileSystemManager();
-    let downloadedImages = [];
-    let downloadCount = 0;
-    const total = images.length;
-    const maxRetries = 3; // 最大重试次数
-
-    // 下载单张图片，支持重试
-    const downloadImageWithRetry = (imgInfo, retryCount = 0) => {
-      wx.downloadFile({
-        url: imgInfo.url,
-        success: (res) => {
-          if (res.statusCode === 200) {
-            // 避免目录结构问题，将斜杠替换为下划线保存为文件名
-            const localPath = `${wx.env.USER_DATA_PATH}/${imgInfo.name.replace(/\//g, '_')}`;
-            fileManager.saveFile({
-              tempFilePath: res.tempFilePath,
-              filePath: localPath,
-              success: (saveRes) => {
-                console.log(`图片 ${imgInfo.name} 保存成功: `, saveRes.savedFilePath);
-                downloadedImages.push({
-                  name: imgInfo.name,
-                  path: saveRes.savedFilePath,
-                  label: imgInfo.label
-                });
-                downloadCount++;
-                if (downloadCount === total) {
-                  wx.showToast({
-                    title: "数据集下载完成",
-                    icon: "success"
-                  });
-                  that.setData({ datasetImages: downloadedImages });
-                }
-              },
-              fail: (err) => {
-                console.error(`图片 ${imgInfo.name} 保存失败`, err);
-                downloadCount++;
-                if (downloadCount === total) {
-                  wx.showToast({
-                    title: "数据集下载完成",
-                    icon: "success"
-                  });
-                  that.setData({ datasetImages: downloadedImages });
-                }
-              }
-            });
-          } else {
-            console.error(`图片 ${imgInfo.name} 下载失败，状态码：`, res.statusCode);
-            if (retryCount < maxRetries) {
-              console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
-              downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
-            } else {
-              console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
-              downloadCount++;
-              if (downloadCount === total) {
-                wx.showToast({
-                  title: "数据集下载完成",
-                  icon: "success"
-                });
-                that.setData({ datasetImages: downloadedImages });
-              }
-            }
-          }
-        },
-        fail: (err) => {
-          console.error(`图片 ${imgInfo.name} 下载失败`, err);
-          if (retryCount < maxRetries) {
-            console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
-            downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
-          } else {
-            console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
-            downloadCount++;
-            if (downloadCount === total) {
-              wx.showToast({
-                title: "数据集下载完成",
-                icon: "success"
-              });
-              that.setData({ datasetImages: downloadedImages });
-            }
-          }
-        }
-      });
-    };
-
-    // 遍历所有图片，开始下载
-    images.forEach((imgInfo) => {
-      downloadImageWithRetry(imgInfo);
     });
   },
 
   // 点击“下载加载模型”按钮时调用
   downloadModel: function () {
-    // 模型文件的下载地址（此处使用 CDN 地址作为示例）
     const modelUrl = "https://hub.fnas64.xin/https://raw.githubusercontent.com/fengwm64/miniprogram-ai-eva/main/model/best_mobilenet_v3_20250215_acc_0.99.onnx";
     const fileManager = wx.getFileSystemManager();
     const modelPath = `${wx.env.USER_DATA_PATH}/mobilenetv3.onnx`;
     const that = this;
+
+    // 检查模型文件是否存在
+    fileManager.access({
+      path: modelPath,
+      success: () => {
+        // 文件已存在，弹出对话框让用户选择是否重新下载
+        wx.showModal({
+          title: "提示",
+          content: "模型文件已存在，是否重新下载？",
+          success: (res) => {
+            if (res.confirm) {
+              // 用户选择重新下载，清空已下载的文件
+              that.clearFile(modelPath)
+                .then(() => {
+                  console.log("开始重新下载模型");
+                  that.downloadModelFile(modelUrl, modelPath);
+                })
+                .catch((err) => {
+                  console.error("清空文件失败", err);
+                });
+            } else if (res.cancel) {
+              // 用户选择取消，直接使用已下载的文件
+              console.log("使用已下载的模型");
+              that.setData({ modelPath: modelPath });
+              wx.showToast({
+                title: "模型已加载",
+                icon: "success"
+              });
+            }
+          }
+        });
+      },
+      fail: () => {
+        // 文件不存在，直接下载
+        console.log("模型文件不存在，开始下载");
+        that.downloadModelFile(modelUrl, modelPath);
+      }
+    });
+  },
+
+  // 下载模型文件
+  downloadModelFile: function (modelUrl, modelPath) {
+    const that = this;
+    const fileManager = wx.getFileSystemManager();
 
     wx.downloadFile({
       url: modelUrl,
