@@ -6,7 +6,13 @@ import json
 dataset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset")
 # 输出的 JSON 文件路径，放在 dataset 目录下
 output_json = os.path.join(dataset_dir, "labels.json")
-# GitHub raw 地址基本路径，请根据你的实际仓库地址修改
+
+# 是否使用 CDN 前缀，True 使用 CDN，False 使用 GitHub Raw 地址
+use_cdn = True
+
+# CDN 前缀（注意末尾包含斜杠），这里假设 CDN 上的目录结构与 GitHub 保持一致
+cdn_prefix = "https://hub.fnas64.xin"
+# GitHub Raw 地址基本路径，请根据你的实际仓库地址修改
 base_url = "https://raw.githubusercontent.com/fengwm64/miniProgram-AI-EVA/main/dataset"
 
 # 支持的图片文件扩展名
@@ -23,8 +29,12 @@ for label in os.listdir(dataset_dir):
             if any(filename.lower().endswith(ext) for ext in supported_ext):
                 # 构造图片相对路径，例如 "0/xxx.jpg"
                 relative_path = os.path.join(label, filename)
-                # 构造图片在 GitHub 上的 URL，需要将系统路径分隔符替换为 '/'
-                image_url = f"{base_url}/{relative_path.replace(os.sep, '/')}"
+                # 根据是否使用 CDN 构造图片 URL
+                if use_cdn:
+                    # 拼接 CDN 前缀，并确保路径分隔符为 '/'
+                    image_url = f"{cdn_prefix}/{base_url}/{relative_path.replace(os.sep, '/')}"
+                else:
+                    image_url = f"{base_url}/{relative_path.replace(os.sep, '/')}"
                 dataset["images"].append({
                     "name": relative_path,
                     "url": image_url,
@@ -34,7 +44,7 @@ for label in os.listdir(dataset_dir):
 # 可选：按照 label 和文件名排序，保证 JSON 顺序固定
 dataset["images"].sort(key=lambda x: (x["label"], x["name"]))
 
-# 将数据集写入 JSON 文件
+# 将数据集写入 JSON 文件，格式化输出便于查看
 with open(output_json, "w", encoding="utf-8") as f:
     json.dump(dataset, f, ensure_ascii=False, indent=2)
 
