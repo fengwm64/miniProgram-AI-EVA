@@ -28,6 +28,172 @@ Page({
     });
   },
 
+  // 检查并下载缺失的图片
+  checkAndDownloadImages: function (images) {
+    const that = this;
+    const fileManager = wx.getFileSystemManager();
+    let downloadedImages = [];
+    let downloadCount = 0;
+    const total = images.length;
+    const maxRetries = 3; // 最大重试次数
+
+    // 检查图片是否已存在
+    const checkAndDownloadImage = (imgInfo, retryCount = 0) => {
+      const localPath = `${wx.env.USER_DATA_PATH}/${imgInfo.name.replace(/\//g, '_')}`;
+
+      fileManager.access({
+        path: localPath,
+        success: () => {
+          console.log(`图片 ${imgInfo.name} 已存在，直接使用`);
+          downloadedImages.push({
+            name: imgInfo.name,
+            path: localPath,
+            label: imgInfo.label
+          });
+          downloadCount++;
+          if (downloadCount === total) {
+            wx.showToast({
+              title: "数据集下载完成",
+              icon: "success"
+            });
+            that.setData({ datasetImages: downloadedImages });
+          }
+        },
+        fail: () => {
+          console.log(`图片 ${imgInfo.name} 不存在，开始下载`);
+          that.downloadImageWithRetry(imgInfo, retryCount);
+        }
+      });
+    };
+
+    // 下载单张图片，支持重试
+    this.downloadImageWithRetry = (imgInfo, retryCount = 0) => {
+      wx.downloadFile({
+        url: imgInfo.url,
+        success: (res) => {
+          if (res.statusCode === 200) {
+            const localPath = `${wx.env.USER_DATA_PATH}/${imgInfo.name.replace(/\//g, '_')}`;
+            fileManager.saveFile({
+              tempFilePath: res.tempFilePath,
+              filePath: localPath,
+              success: (saveRes) => {
+                console.log(`图片 ${imgInfo.name} 保存成功: `, saveRes.savedFilePath);
+                downloadedImages.push({
+                  name: imgInfo.name,
+                  path: saveRes.savedFilePath,
+                  label: imgInfo.label
+                });
+                downloadCount++;
+                if (downloadCount === total) {
+                  wx.showToast({
+                    title: "数据集下载完成",
+                    icon: "success"
+                  });
+                  that.setData({ datasetImages: downloadedImages });
+                }
+              },
+              fail: (err) => {
+                console.error(`图片 ${imgInfo.name} 保存失败`, err);
+                downloadCount++;
+                if (downloadCount === total) {
+                  wx.showToast({
+                    title: "数据集下载完成",
+                    icon: "success"
+                  });
+                  that.setData({ datasetImages: downloadedImages });
+                }
+              }
+            });
+          } else {
+            console.error(`图片 ${imgInfo.name} 下载失败，状态码：`, res.statusCode);
+            if (retryCount < maxRetries) {
+              console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
+              that.downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
+            } else {
+              console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
+              downloadCount++;
+              if (downloadCount === total) {
+                wx.showToast({
+                  title: "数据集下载完成",
+                  icon: "success"
+                });
+                that.setData({ datasetImages: downloadedImages });
+              }
+            }
+          }
+        },
+        fail: (err) => {
+          console.error(`图片 ${imgInfo.name} 下载失败`, err);
+          if (retryCount < maxRetries) {
+            console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
+            that.downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
+          } else {
+            console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
+            downloadCount++;
+            if (downloadCount === total) {
+              wx.showToast({
+                title: "数据集下载完成",
+                icon: "success"
+              });
+              that.setData({ datasetImages: downloadedImages });
+            }
+          }
+        }
+      });
+    };
+
+    // 遍历所有图片，开始下载
+    images.forEach((imgInfo) => {
+      checkAndDownloadImage(imgInfo);
+    });
+  },
+
+  // 下载单张图片，支持重试
+  downloadImageWithRetry: function (imgInfo, retryCount = 0) {
+    const that = this;
+    wx.downloadFile({
+      url: imgInfo.url,
+      success: (res) => {
+        if (res.statusCode === 200) {
+          const localPath = `${wx.env.USER_DATA_PATH}/${imgInfo.name.replace(/\//g, '_')}`;
+          wx.getFileSystemManager().saveFile({
+            tempFilePath: res.tempFilePath,
+            filePath: localPath,
+            success: (saveRes) => {
+              console.log(`图片 ${imgInfo.name} 保存成功: `, saveRes.savedFilePath);
+              that.data.datasetImages.push({
+                name: imgInfo.name,
+                path: saveRes.savedFilePath,
+                label: imgInfo.label
+              });
+              that.setData({ datasetImages: that.data.datasetImages });
+            },
+            fail: (err) => {
+              console.error(`图片 ${imgInfo.name} 保存失败`, err);
+            }
+          });
+        } else {
+          console.error(`图片 ${imgInfo.name} 下载失败，状态码：`, res.statusCode);
+          if (retryCount < 3) {
+            console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
+            that.downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
+          } else {
+            console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
+          }
+        }
+      },
+      fail: (err) => {
+        console.error(`图片 ${imgInfo.name} 下载失败`, err);
+        if (retryCount < 3) {
+          console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
+          that.downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
+        } else {
+          console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
+        }
+      }
+    });
+  },
+
   // 点击“下载评测数据集”按钮时调用
   downloadDataset: function () {
     const datasetUrl = "https://hub.fnas64.xin/https://raw.githubusercontent.com/fengwm64/miniprogram-ai-eva/main/dataset/labels.json";
@@ -66,7 +232,7 @@ Page({
                     console.log("解析后的数据集：", dataset);
                     that.setData({ datasetLabels: dataset });
                     // 检查图片是否已下载
-                    that.checkAndDownloadImages(dataset.images);
+                    that.checkAndDownloadImages(dataset.images); // 调用 checkAndDownloadImages
                   } catch (e) {
                     console.error("JSON 解析错误", e);
                   }
@@ -146,6 +312,98 @@ Page({
       fail: (err) => {
         console.error("下载文件失败", err);
       }
+    });
+  },
+
+  // 遍历图片列表，下载所有图片并保存到本地
+  downloadImages: function (images) {
+    const that = this;
+    const fileManager = wx.getFileSystemManager();
+    let downloadedImages = [];
+    let downloadCount = 0;
+    const total = images.length;
+    const maxRetries = 3; // 最大重试次数
+
+    // 下载单张图片，支持重试
+    const downloadImageWithRetry = (imgInfo, retryCount = 0) => {
+      wx.downloadFile({
+        url: imgInfo.url,
+        success: (res) => {
+          if (res.statusCode === 200) {
+            // 避免目录结构问题，将斜杠替换为下划线保存为文件名
+            const localPath = `${wx.env.USER_DATA_PATH}/${imgInfo.name.replace(/\//g, '_')}`;
+            fileManager.saveFile({
+              tempFilePath: res.tempFilePath,
+              filePath: localPath,
+              success: (saveRes) => {
+                console.log(`图片 ${imgInfo.name} 保存成功: `, saveRes.savedFilePath);
+                downloadedImages.push({
+                  name: imgInfo.name,
+                  path: saveRes.savedFilePath,
+                  label: imgInfo.label
+                });
+                downloadCount++;
+                if (downloadCount === total) {
+                  wx.showToast({
+                    title: "数据集下载完成",
+                    icon: "success"
+                  });
+                  that.setData({ datasetImages: downloadedImages });
+                }
+              },
+              fail: (err) => {
+                console.error(`图片 ${imgInfo.name} 保存失败`, err);
+                downloadCount++;
+                if (downloadCount === total) {
+                  wx.showToast({
+                    title: "数据集下载完成",
+                    icon: "success"
+                  });
+                  that.setData({ datasetImages: downloadedImages });
+                }
+              }
+            });
+          } else {
+            console.error(`图片 ${imgInfo.name} 下载失败，状态码：`, res.statusCode);
+            if (retryCount < maxRetries) {
+              console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
+              downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
+            } else {
+              console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
+              downloadCount++;
+              if (downloadCount === total) {
+                wx.showToast({
+                  title: "数据集下载完成",
+                  icon: "success"
+                });
+                that.setData({ datasetImages: downloadedImages });
+              }
+            }
+          }
+        },
+        fail: (err) => {
+          console.error(`图片 ${imgInfo.name} 下载失败`, err);
+          if (retryCount < maxRetries) {
+            console.log(`第 ${retryCount + 1} 次重试下载图片 ${imgInfo.name}`);
+            downloadImageWithRetry(imgInfo, retryCount + 1); // 重试下载
+          } else {
+            console.error(`图片 ${imgInfo.name} 下载失败，已达到最大重试次数`);
+            downloadCount++;
+            if (downloadCount === total) {
+              wx.showToast({
+                title: "数据集下载完成",
+                icon: "success"
+              });
+              that.setData({ datasetImages: downloadedImages });
+            }
+          }
+        }
+      });
+    };
+
+    // 遍历所有图片，开始下载
+    images.forEach((imgInfo) => {
+      downloadImageWithRetry(imgInfo);
     });
   },
 
@@ -351,7 +609,7 @@ Page({
       });
   },
 
-  // 预处理图像（优化版）
+  // 预处理图像
   preprocessImage: function (imageData) {
     return new Promise((resolve) => {
       const rgbaData = new Uint8Array(imageData.data);
@@ -383,6 +641,7 @@ Page({
     }
     return maxIndex; // 返回最大值的索引
   },
+
   getClass: function (index) {
     // 假设有一个类别数组
     const classes = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/', '=', , '>', '<', '*', '-'];

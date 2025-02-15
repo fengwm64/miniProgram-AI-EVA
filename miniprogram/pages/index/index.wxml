@@ -6,7 +6,7 @@
   <button class="btn" bindtap="downloadDataset">下载评测数据集</button>
   <button class="btn" bindtap="downloadModel">下载加载模型</button>
   <button class="btn" bindtap="startEvaluation">运行评测</button>
-  <button class="btn export-btn" bindtap="exportResults">导出评测结果</button>
+  <button class="btn export-btn" bindtap="saveResults">导出评测结果</button>
 </view>
 
 <view class="container">
