@@ -7,7 +7,7 @@ dataset_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dataset"
 # 输出的 JSON 文件路径，放在 dataset 目录下
 output_json = os.path.join(dataset_dir, "labels.json")
 # GitHub raw 地址基本路径，请根据你的实际仓库地址修改
-base_url = "https://raw.githubusercontent.com/fengwm64/miniprogram-ai-eva/main/dataset"
+base_url = "https://raw.githubusercontent.com/fengwm64/miniProgram-AI-EVA/main/dataset"
 
 # 支持的图片文件扩展名
 supported_ext = [".jpg", ".jpeg", ".png"]
