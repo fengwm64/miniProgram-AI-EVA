@@ -1,12 +1,15 @@
 // index.js
-const modelWidth = 50.0; // 根据模型输入尺寸定义
-const modelHeight = 50.0;
+
+// 模型输入的图像尺寸和通道数
+const modelHeight = 50.0;  // 模型所需的输入高度
+const modelWidth = 50.0;   // 模型所需的输入宽度
+const modelChannel = 3;    // 模型输入的通道数（例如，3表示RGB图像）
 
 Page({
   data: {
     datasetLabels: {},
     datasetImages: [],
-    modelPath: "",
+    modelPath: `${wx.env.USER_DATA_PATH}/mobilenetv3.onnx`,
     testImagePath: "" // 用于存储测试图片路径
   },
 
@@ -499,10 +502,13 @@ Page({
       return;
     }
 
+    console.log("开始评测，总图片数量：", images.length);
+
     // 遍历所有图片进行评测
     const results = [];
     const evaluateNext = async (index) => {
       if (index >= images.length) {
+        console.log("所有图片评测完成，开始保存结果");
         that.saveResults(results);
         return;
       }
@@ -510,11 +516,14 @@ Page({
       const image = images[index];
       that.setData({ testImagePath: image.path });
 
+      console.log(`开始评测第 ${index + 1} 张图片：${image.name}`);
+
       try {
         const imageData = await that.loadTestImage(image.path);
         const precisionLevels = [0, 1, 2, 3, 4];
 
         for (const precision of precisionLevels) {
+          console.log(`正在使用精度等级 ${precision} 进行推理`);
           await that.initInference(precision);
           const startTime = Date.now();
 
@@ -522,47 +531,74 @@ Page({
             that.runModelInference(imageData, resolve);
           });
 
+          const inferenceTime = Date.now() - startTime;
+          console.log(`精度等级 ${precision} 推理完成，耗时：${inferenceTime}ms`);
+
           results.push({
             image: image.name,
             precisionLevel: precision,
-            timeMs: Date.now() - startTime,
+            timeMs: inferenceTime,
             predictedClass: predictedClass,
             actualClass: image.label
+          });
+
+          console.log(`图片 ${image.name} 在精度等级 ${precision} 下的结果：`, {
+            predictedClass: predictedClass,
+            actualClass: image.label,
+            timeMs: inferenceTime
           });
         }
       } catch (error) {
         console.error(`图片 ${image.name} 评测失败`, error);
       }
 
+      console.log(`第 ${index + 1} 张图片评测完成`);
       evaluateNext(index + 1);
     };
 
     evaluateNext(0);
   },
 
-  // 加载测试图片数据
+  // 加载测试图片
   loadTestImage: function (imagePath) {
     return new Promise((resolve, reject) => {
       wx.getImageInfo({
         src: imagePath,
         success: (res) => {
-          const ctx = wx.createCanvasContext('testCanvas');
-          ctx.drawImage(res.path, 0, 0, modelWidth, modelHeight);
-          ctx.draw(false, () => {
-            wx.canvasGetImageData({
-              canvasId: 'testCanvas',
-              x: 0,
-              y: 0,
-              width: modelWidth,
-              height: modelHeight,
-              success: (imageData) => {
+          console.log("图片信息获取成功：", res);
+          // 获取隐藏的 canvas 节点
+          wx.createSelectorQuery()
+            .select('#offscreenCanvas')
+            .node((nodeResult) => {
+              if (!nodeResult) {
+                const errMsg = '未找到 offscreenCanvas 节点，请确保已在 WXML 中添加且页面已渲染完成';
+                console.error(errMsg);
+                return reject(new Error(errMsg));
+              }
+              const canvas = nodeResult.node;
+              // 设置 canvas 尺寸
+              canvas.width = modelWidth;
+              canvas.height = modelHeight;
+              // 获取 2D 绘图上下文（新版接口，与 Web 标准一致）
+              const ctx = canvas.getContext('2d');
+              // 绘制图片到 canvas 上
+              ctx.drawImage(res.path, 0, 0, modelWidth, modelHeight);
+              try {
+                // 同步获取图像数据
+                const imageData = ctx.getImageData(0, 0, modelWidth, modelHeight);
+                console.log("图片数据加载成功");
                 resolve(imageData);
-              },
-              fail: reject
-            });
-          });
+              } catch (err) {
+                console.error("获取图片数据失败", err);
+                reject(err);
+              }
+            })
+            .exec();
         },
-        fail: reject
+        fail: (err) => {
+          console.error("获取图片信息失败", err);
+          reject(err);
+        }
       });
     });
   },
@@ -572,6 +608,7 @@ Page({
     return new Promise((resolve, reject) => {
       if (this.session) this.session.destroy();
 
+      console.log(`正在初始化推理会话，精度等级：${precisionLevel}`);
       this.session = wx.createInferenceSession({
         model: this.data.modelPath,
         precisionLevel: precisionLevel,
@@ -579,9 +616,13 @@ Page({
         allowQuantize: false,
       });
 
-      this.session.onError(reject);
+      this.session.onError((err) => {
+        console.error(`推理会话初始化失败，精度等级：${precisionLevel}`, err);
+        reject(err);
+      });
+
       this.session.onLoad(() => {
-        console.log(`会话加载完成: 精度${precisionLevel}`);
+        console.log(`推理会话初始化成功，精度等级：${precisionLevel}`);
         resolve();
       });
     });
@@ -589,19 +630,25 @@ Page({
 
   // 执行模型推理
   runModelInference: function (imageData, callback) {
+    console.log("开始预处理图片数据");
     this.preprocessImage(imageData)
       .then(processedData => {
+        console.log("图片数据预处理完成");
         const inputTensor = {
-          shape: [1, 3, modelHeight, modelWidth],
+          shape: [1, modelChannel, modelHeight, modelWidth],
           data: processedData.buffer,
           type: 'float32'
         };
 
+        console.log("开始执行模型推理");
         return this.session.run({ "input": inputTensor });
       })
       .then(result => {
+        console.log("模型推理完成");
         const output = new Float32Array(result.output.data);
-        callback(this.getClass(this.getMaxIndex(output)));
+        const predictedClass = this.getClass(this.getMaxIndex(output));
+        console.log("推理结果：", predictedClass);
+        callback(predictedClass);
       })
       .catch(error => {
         console.error("推理失败:", error);
@@ -611,22 +658,53 @@ Page({
 
   // 预处理图像
   preprocessImage: function (imageData) {
-    return new Promise((resolve) => {
-      const rgbaData = new Uint8Array(imageData.data);
-      const float32Data = new Float32Array(3 * modelHeight * modelWidth);
+    return new Promise((resolve, reject) => {
+      // 获取图像的原始数据并将其转换为 Uint8Array 以便逐像素访问
+      const origData = new Uint8Array(imageData.data.buffer);
+      // 创建一个 Float32Array，用于存储预处理后的数据。长度为目标尺寸的宽高与通道数的乘积
+      var dstInput = new Float32Array(3 * modelHeight * modelWidth);
 
-      // 预处理参数
+      // 计算缩放比率，用于将原图缩放到模型所需的尺寸
+      const hRatio = imageData.height / modelHeight;
+      const wRatio = imageData.width / modelWidth;
+
+      // 原始图像在内存中的每行字节数，RGBA 四个通道（每个像素4字节）
+      const origHStride = imageData.width * 4;
+      const origWStride = 4;
+
+      // 预定义的均值和标准差，用于归一化处理
       const mean = [0.485, 0.456, 0.406];
-      const std = [0.229, 0.224, 0.225];
+      const reverse_div = [4.367, 4.464, 4.444];  // 标准差的倒数
+      const ratio = 1 / 255.0;
+      // 计算归一化比例和均值调整，以简化公式
+      const normalized_div = [ratio * reverse_div[0], ratio * reverse_div[1], ratio * reverse_div[2]];
+      const normalized_mean = [mean[0] * reverse_div[0], mean[1] * reverse_div[1], mean[2] * reverse_div[2]];
 
-      let offset = 0;
-      for (let c = 0; c < 3; c++) {
-        for (let i = 0; i < modelHeight * modelWidth; i++) {
-          const val = rgbaData[i * 4 + c] / 255; // 转换到 [0,1] 范围
-          float32Data[offset++] = (val - mean[c]) / std[c]; // 标准化
+      var idx = 0; // 用于遍历目标数组的索引
+
+      // 遍历每个通道（RGB，假设为3通道）
+      for (var c = 2; c >= 0; --c) { // 遍历 BGR 通道
+        // 遍历模型要求的目标高度
+        for (var h = 0; h < modelHeight; ++h) {
+          // 计算对应原始图像中的高度位置
+          const origH = Math.round(h * hRatio);
+          const origHOffset = origH * origHStride; // 原图中当前行的偏移量
+
+          // 遍历模型要求的目标宽度
+          for (var w = 0; w < modelWidth; ++w) {
+            // 计算对应原始图像中的宽度位置
+            const origW = Math.round(w * wRatio);
+            // 计算原始图像的当前像素的索引位置
+            const origIndex = origHOffset + origW * origWStride + c;
+
+            // 进行归一化处理：首先根据通道（RGB）缩放值，然后减去均值以消除偏差
+            var val = origData[origIndex] * (normalized_div[c]) - normalized_mean[c];
+            dstInput[idx] = val;  // 将归一化后的值存入目标数组
+            idx++;
+          }
         }
       }
-      resolve(float32Data);
+      resolve(dstInput); // 返回预处理后的数据
     });
   },
 
@@ -644,7 +722,7 @@ Page({
 
   getClass: function (index) {
     // 假设有一个类别数组
-    const classes = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/', '=', , '>', '<', '*', '-'];
+    const classes = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/', '=', '>', '<', '*', '-'];
     const className = classes[index] || 'Unknown Class'; // 根据索引获取对应的类别名称
     return classes[index] || 'Unknown Class';
   },

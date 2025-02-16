@@ -15,4 +15,7 @@
     <text class="result-item">平均推理时间：{{avgTime}} ms</text>
     <text class="result-item">中位数推理时间：{{medianTime}} ms</text>
   </view>
+
+  <canvas type="2d" id="offscreenCanvas" style=" width: {{modelWidth}}px; height: {{modelHeight}}px;"></canvas>
+
 </view>
